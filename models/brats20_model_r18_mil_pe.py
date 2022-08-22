@@ -2,7 +2,6 @@
 
 import torch
 from torch import nn
-#from resnet import resnet18
 import torchvision.models as models
 import torch.nn.functional as F
 import math
@@ -20,15 +19,6 @@ class mul3D_MIL_pe(nn.Module):
         # resnet model is until average pooling
         if self.model_name == 'resnet18' :
             resnet = models.resnet18(pretrained=True)
-        elif self.model_name == 'resnet34':
-            resnet = models.resnet34(pretrained=True)
-        elif self.model_name == 'resnet50':
-            resnet = models.resnet50(pretrained=True)
-        elif self.model_name == 'resnet101':
-            resnet = models.resnet101(pretrained=True)
-        elif self.model_name == 'resnet152':
-            resnet = models.resnet152(pretrained=True)
-
 
         # change the default channel
         resnet.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -36,13 +26,9 @@ class mul3D_MIL_pe(nn.Module):
         self.backbone = nn.Sequential(*list(resnet.children())[0:-1])
 
         #gated attention mechanism
-        if self.model_name == 'resnet18' or self.model_name == 'resnet34':
+        if self.model_name == 'resnet18':
             self.L = 512
             self.D = 256
-            self.K = 1
-        elif self.model_name == 'resnet50' or self.model_name == 'resnet101' or self.model_name == 'resnet152':
-            self.L = 2048
-            self.D = 1024
             self.K = 1
 
         #positional embedding
@@ -60,7 +46,6 @@ class mul3D_MIL_pe(nn.Module):
         )
 
         self.attention_weights =  nn.Linear(self.D, self.K)
-            #not clear  dimention  of attention weights?
 
         self.regressor = nn.Sequential(
             nn.Linear(512, 64),
@@ -97,9 +82,9 @@ class mul3D_MIL_pe(nn.Module):
 
 
     def forward(self, x):
-        # b, s, c, w, h !!
         b,s, c, w, h = x.shape
-        x = x.view(b*s, c, w, h) #[160*155, 1, 160, 160]
+
+        x = x.view(b*s, c, w, h) 
 
         Ha = self.backbone(x)
 
@@ -107,6 +92,7 @@ class mul3D_MIL_pe(nn.Module):
 
         #positional encoding
         Ha = Ha.view(batch_slices, channel*width*height) ## [155, 512*1*1]
+
         H = torch.add(Ha, self.pe) # [155,512]
 
         A_V = self.attention_V(H)  # NxD [155, 256]
@@ -115,11 +101,9 @@ class mul3D_MIL_pe(nn.Module):
 
         A_weights = self.attention_weights(A_V * A_U)  ## NxK [155,1]
 
-        #A_weights = torch.transpose(A_weights, 1,0)  #KxN  [1, 620]
-
         n, k = A_weights.shape #n is batch size, k is slices [155, 1]
 
-        A = F.softmax(A_weights, dim=0)  # softmax over N # 3d heatmap, get import slices [155,1]
+        A = F.softmax(A_weights, dim=0)  # [155,1]
 
         heatmap_weights = A #[155, 1]
         sum_weights_after_softmax = sum(A) #[1.0000]
@@ -132,21 +116,13 @@ class mul3D_MIL_pe(nn.Module):
         # using dropout layer
         #M = self.dropout_layer(M_0)
 
-        Y_pred = self.regressor(M)  #fully connected layer  [1,1]
+        Y_pred = self.regressor(M)  
 
         if self.heatmaps:
             return Y_pred, heatmap_weights
         else:
             return Y_pred
 
-
-if  __name__ == "__main__":
-
-    #model = mulMod3D_MIL(1).cuda()
-    model = mul3D_MIL_pe(1, 'resnet18')
-    #summary(model)
-
-    print(model.eval())
 
 
 
